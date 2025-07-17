@@ -1,0 +1,48 @@
+# --- Stage 1: Build Stage ---
+# Use an official Node.js image. The 'alpine' version is lightweight.
+FROM node:18-alpine AS builder
+
+# Set the working directory inside the container
+WORKDIR /app
+
+# Copy package.json and package-lock.json first.
+# This leverages Docker's layer caching. If these files don't change,
+# Docker won't reinstall dependencies on every build, making it much faster.
+COPY package*.json ./
+
+# Install all dependencies, including development ones needed for building.
+RUN npm install
+
+# Copy the rest of your backend source code into the container.
+COPY . .
+
+# Compile your TypeScript code into JavaScript.
+# This command runs 'tsc', which reads your tsconfig.json and outputs
+# the compiled .js files into a /dist directory.
+RUN npm run build
+
+
+# --- Stage 2: Production Stage ---
+# Start from a fresh, clean Node.js image for the final product.
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copy only the necessary files from the 'builder' stage.
+# First, copy the package files.
+COPY --from=builder /app/package*.json ./
+
+# Install *only* the production dependencies.
+# The --omit=dev flag skips packages like typescript, ts-node, etc.
+# which are not needed to run the compiled code.
+RUN npm install --omit=dev
+
+# Copy the compiled JavaScript code from the 'builder' stage.
+COPY --from=builder /app/dist ./dist
+
+# Expose the port that your Express server will run on.
+EXPOSE 3001
+
+# The command that will be executed when the container starts.
+# This runs your compiled server file with Node.js.
+CMD [ "node", "dist/server.js" ]

@@ -1,0 +1,39 @@
+# Specifies the version of the Docker Compose file format.
+version: '3.8'
+
+# Defines the services (containers) that make up your application.
+services:
+  # Defines the backend service.
+  backend:
+    build:
+      # The build context is the 'backend' directory.
+      context: ./backend
+      # Specifies the Dockerfile to use within that context.
+      dockerfile: Dockerfile.backend
+    ports:
+      # Maps port 3001 on your local machine to port 3001 in the container.
+      - "3001:3001"
+    volumes:
+      # Mounts the backend's source code directory into the container.
+      # This allows for live reloading when you change backend code.
+      - ./backend/src:/app/src
+    # Overrides the default command in the Dockerfile to run the dev server.
+    command: npm run dev
+
+  # Defines the frontend service.
+  frontend:
+    build:
+      # The build context is the 'frontend' directory.
+      context: ./frontend
+      # We will create this Dockerfile in the next step.
+      dockerfile: Dockerfile.frontend
+    ports:
+      # Maps port 3000 on your local machine to port 3000 in the container (for React).
+      - "3000:3000"
+    volumes:
+      # Mounts the frontend's source code for hot-reloading.
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    # Ensures that the backend service is started before the frontend service.
+    depends_on:
+      - backend
