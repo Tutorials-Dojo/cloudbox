@@ -1,17 +1,14 @@
 import { NodeSSH } from 'node-ssh';
 import path from 'path';
+import fs from 'fs/promises';
+import os from 'os';
 
 // Configuration for your VM.
-// Ensure you have a .env file in the backend/ directory with these variables.
 const vmConfig = {
   host: process.env.VM_HOST,
   username: process.env.VM_USERNAME,
   privateKeyPath: process.env.VM_PRIVATE_KEY_PATH,
 };
-
-if (!vmConfig.host || !vmConfig.username || !vmConfig.privateKeyPath) {
-    throw new Error("Missing required VM environment variables (VM_HOST, VM_USERNAME, VM_PRIVATE_KEY_PATH).");
-}
 
 /**
  * Orchestrates the creation and launch of a Firecracker microVM.
@@ -19,55 +16,63 @@ if (!vmConfig.host || !vmConfig.username || !vmConfig.privateKeyPath) {
  * @returns The public URL of the running application inside the microVM.
  */
 export const runCodeInVM = async (files: { [key:string]: string }) => {
-  const connection = new NodeSSH();
-  try {
-    await connection.connect(vmConfig);
+  // === FIX IS HERE: Validate environment variables inside the function ===
+  // This allows TypeScript to correctly narrow the types for the rest of the function.
+  if (!vmConfig.host || !vmConfig.username || !vmConfig.privateKeyPath) {
+    // Log the error for easier debugging on the server side.
+    console.error("Missing required VM environment variables. Check your .env file.");
+    throw new Error("Server configuration is incomplete. Missing VM environment variables.");
+  }
+  // ======================================================================
 
-    // 1. Create a unique ID for this execution session
-    const sessionId = `session_${Date.now()}`;
+  const connection = new NodeSSH();
+  const sessionId = `session_${Date.now()}`;
+  const localTempDir = await fs.mkdtemp(path.join(os.tmpdir(), `upload-${sessionId}-`));
+  
+  try {
+    // 1. Write in-memory files to the local temporary directory
+    for (const fileName in files) {
+      const content = files[fileName];
+      const localPath = path.join(localTempDir, fileName);
+      await fs.writeFile(localPath, content);
+    }
+
+    // 2. Connect to the remote VM (No "!" needed now)
+    await connection.connect({
+      host: vmConfig.host,
+      username: vmConfig.username,
+      privateKeyPath: vmConfig.privateKeyPath,
+    });
+
+    // 3. Create a unique project directory on the remote VM
     const remoteProjectDir = `/tmp/${sessionId}_project_files`;
     await connection.execCommand(`mkdir -p ${remoteProjectDir}`);
 
-    // 2. Upload user's project files to the host VM
-    const localTempDir = path.join(__dirname, '..', '..', 'temp_uploads');
-    const putFileOptions = {
-        concurrency: 10
-    };
-    await connection.putDirectory(localTempDir, remoteProjectDir, {
-      ...putFileOptions,
-      // Create an in-memory representation of the user's files
-      // This is a workaround because putDirectory works with the local filesystem.
-      // A more robust solution might write to a temp dir locally first.
-      // For this step, we will upload one by one.
+    // 4. Upload the entire temporary directory to the remote host
+    const putResult = await connection.putDirectory(localTempDir, remoteProjectDir, {
+      recursive: true,
+      concurrency: 10,
     });
 
-    // Let's upload files one-by-one as it's simpler with in-memory content
-    for (const fileName in files) {
-        const content = files[fileName];
-        const remotePath = path.join(remoteProjectDir, fileName);
-        await connection.put(Buffer.from(content), remotePath);
+    if (!putResult) {
+        throw new Error('Failed to upload project files to the VM.');
     }
-    
-    // 3. Execute the orchestration script on the host VM
-    // The script will create, configure, and launch the microVM.
-    // It will print the public URL as its final output.
+
+    // 5. Execute the orchestration script on the host VM
     const command = `bash ~/launch_microvm.sh ${remoteProjectDir} ${sessionId}`;
-    
     const result = await connection.execCommand(command);
 
     if (result.code !== 0) {
-        // If the script failed, throw an error with the details
-        throw new Error(`VM orchestration script failed with code ${result.code}: ${result.stderr}`);
+      throw new Error(`VM orchestration script failed with code ${result.code}: ${result.stderr}`);
     }
 
-    // 4. The stdout of the script is our URL
+    // 6. The stdout of the script is our URL
     const publicUrl = result.stdout.trim();
-
     if (!publicUrl.startsWith('http')) {
-        throw new Error(`Script did not return a valid URL. Output: ${publicUrl}`);
+      throw new Error(`Script did not return a valid URL. Output: ${publicUrl}`);
     }
 
-    // Clean up the uploaded project files on the host (optional)
+    // Clean up the project files on the host VM
     await connection.execCommand(`rm -rf ${remoteProjectDir}`);
 
     return {
@@ -78,8 +83,10 @@ export const runCodeInVM = async (files: { [key:string]: string }) => {
 
   } catch (error) {
     console.error('Failed to execute code in VM:', error);
-    throw error; // Re-throw to be handled by the route
+    throw error;
   } finally {
+    // 7. Clean up the local temporary directory and close the connection
+    await fs.rm(localTempDir, { recursive: true, force: true });
     if (connection.isConnected()) {
       connection.dispose();
     }
