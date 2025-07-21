@@ -4,18 +4,35 @@ import { Sidebar } from './components/Layout/Sidebar';
 import { CodeEditor } from './components/Editor/CodeEditor';
 import { Preview } from './components/Editor/Preview';
 import { useFiles } from './hooks/useFiles';
-import { FileNode } from './types/files';
-// Other components and hooks...
+import { runProject } from './services/api'; // Import the API function
+import './index.css'; // Make sure Tailwind styles are imported
 
-const IDEPage = () => {
+const App = () => {
     const { files, activeFile, setActiveFile, updateFileContent, isLoading } = useFiles();
-    // Add states for VM, preview, etc.
     const [isRunDisabled, setIsRunDisabled] = useState(false);
     const [vmStatus, setVmStatus] = useState<'running' | 'starting' | 'stopped'>('stopped');
+    const [previewUrl, setPreviewUrl] = useState<string>(''); // State for the preview URL
 
-    const handleRun = () => {
-        console.log("Running code...");
-        // This is where you would call your backend's VM/container service
+    const handleRun = async () => {
+        setIsRunDisabled(true);
+        setVmStatus('starting');
+        setPreviewUrl(''); // Clear previous URL while starting
+        try {
+            const result = await runProject(files);
+            if (result.success && result.url) {
+                setPreviewUrl(result.url); // Set the new URL from the backend
+                setVmStatus('running');
+            } else {
+                alert(`Failed to run project: ${result.message}`);
+                setVmStatus('stopped');
+            }
+        } catch (error) {
+            console.error("Error calling run API:", error);
+            alert('An error occurred while trying to run the code. Check the console.');
+            setVmStatus('stopped');
+        } finally {
+            setIsRunDisabled(false);
+        }
     };
 
     const handleFileChange = (content: string | undefined) => {
@@ -25,33 +42,48 @@ const IDEPage = () => {
     };
     
     if (isLoading) {
-        return <div>Loading Workspace...</div>;
+        return <div className="flex items-center justify-center h-screen">Loading Workspace...</div>;
+    }
+
+    const getLanguage = (fileName: string) => {
+        const extension = fileName.split('.').pop();
+        switch (extension) {
+            case 'js':
+                return 'javascript';
+            case 'css':
+                return 'css';
+            case 'html':
+                return 'html';
+            default:
+                return 'plaintext';
+        }
     }
 
     return (
-        <div className="h-screen flex flex-col">
+        <div className="h-screen flex flex-col bg-gray-50">
             <Header onRun={handleRun} isRunDisabled={isRunDisabled} />
-            <div className="flex-1 flex">
+            <div className="flex-1 flex min-h-0"> {/* Use min-h-0 to prevent overflow */}
                 <Sidebar 
-                    // This needs to be adapted for your FileNode structure
                     files={Object.keys(files).map(name => ({ name, path: name, type: 'file' }))} 
                     activeFile={activeFile}
                     onFileSelect={setActiveFile}
                     vmStatus={vmStatus}
                 />
-                <main className="flex-1 flex">
-                    <div className="w-1/2">
+                <main className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-px bg-gray-200">
+                    <div className="bg-white h-full">
                         <CodeEditor 
-                            language="javascript" // This should be dynamic based on file type
+                            language={getLanguage(activeFile)}
                             value={files[activeFile] || ''}
                             onChange={handleFileChange}
                         />
                     </div>
-                    <div className="w-1/2">
-                        <Preview htmlContent={files['index.html'] || ''} />
+                    <div className="bg-white h-full">
+                        <Preview previewUrl={previewUrl} />
                     </div>
                 </main>
             </div>
         </div>
     );
 };
+
+export default App;
