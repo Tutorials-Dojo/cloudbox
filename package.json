@@ -3,11 +3,14 @@
     "@monaco-editor/react": "^4.7.0",
     "@types/react": "^19.1.8",
     "axios": "^1.10.0",
+    "dotenv": "^17.2.0",
     "express": "^5.1.0",
     "lucide-react": "^0.525.0",
+    "node-ssh": "^13.2.1",
     "react": "^19.1.0"
   },
   "devDependencies": {
-    "@types/express": "^5.0.3"
+    "@types/express": "^5.0.3",
+    "@types/node-ssh": "^7.0.6"
   }
 }

@@ -1,21 +1,30 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { getProjectFiles } from '../controllers/projectController';
+import { runCodeInVM } from '../services/firecrackerService';
 
-// 1. Create a new router instance from Express.
 const router = Router();
 
-// 2. Define the API route.
-// When the frontend sends a GET request to '/api/project/files',
-// this route will be triggered.
-router.get(
-  '/files', // The specific path for this endpoint
-  getProjectFiles // The controller function that will handle the request
-);
+// This route gets the initial template files
+router.get('/files', getProjectFiles);
 
-// In the future, you could add more routes here for this "project" resource.
-// For example:
-// router.post('/files', saveProjectFiles);
-// router.post('/run', runProjectCode);
+// This route takes files from the frontend and executes them on the VM
+router.post('/run', async (req: Request, res: Response) => {
+  try {
+    const { files } = req.body; // Expects a { files: { 'filename.js': 'content' } } payload
+    
+    // FIX IS HERE: Check if the object is null/undefined or has zero keys
+    if (!files || Object.keys(files).length === 0) {
+      return res.status(400).json({ message: 'No files provided.' });
+    }
 
-// 3. Export the router so it can be used by the main server file.
+    const result = await runCodeInVM(files);
+    res.status(200).json(result);
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+    console.error('Run endpoint error:', errorMessage);
+    res.status(500).json({ message: 'Failed to run code.', error: errorMessage });
+  }
+});
+
 export default router;
